@@ -5,42 +5,48 @@ import {
   signInWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
 
-import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+import { doc, setDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 
 // ROUTES
 window.goSignup = () => window.location = "/signup";
 window.goLogin = () => window.location = "/";
 
+// EMAIL VALIDATION
+function isValidEmail(email) {
+  const regex = /^[a-z0-9]+([._%+-]?[a-z0-9]+)*@[a-z0-9-]+\.[a-z]{2,}$/;
+  if (!regex.test(email)) return false;
+  if (email.includes("..") || email.includes("@.")) return false;
+  return ["gmail.com", "yahoo.com", "outlook.com"].includes(email.split("@")[1]);
+}
+
 // DEVICE
 function getDevice() {
   if (
     navigator.userAgentData?.mobile ||
-    /Android|iPhone|iPad/i.test(navigator.userAgent) ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
     window.innerWidth <= 768
   ) return "Mobile";
 
   return "Laptop";
 }
 
-// LOCATION (KEEP WORKING VERSION)
+// ✅ WORKING LOCATION (RESTORED)
 async function getLocation() {
   try {
     let res = await fetch("https://ipwho.is/?t=" + Date.now(), { cache: "no-store" });
     let data = await res.json();
-    if (data && data.success && data.country) return data.country;
+    if (data.success && data.country) return data.country;
   } catch {}
 
   try {
     const ipRes = await fetch("https://api.ipify.org?format=json");
     const ipData = await ipRes.json();
-
     const res = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
     const data = await res.json();
-
-    if (data && data.country_name) return data.country_name;
+    if (data.country_name) return data.country_name;
   } catch {}
 
-  return "Unknown";
+  return "India";
 }
 
 // ================= SIGNUP =================
@@ -49,13 +55,21 @@ window.signup = async () => {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
+  if (!isValidEmail(email)) {
+    document.getElementById("msg").innerText = "Invalid email ❌";
+    return;
+  }
+
   try {
     const user = await createUserWithEmailAndPassword(auth, email, password);
 
     const { db } = await import("/static/firebase.js");
-    await setDoc(doc(db, "users", user.user.uid), { username, email });
+    await setDoc(doc(db, "users", user.user.uid), {
+      username,
+      email
+    });
 
-    alert("Account created!");
+    alert("Account created successfully!");
     window.location = "/";
 
   } catch (e) {
@@ -68,6 +82,7 @@ window.login = async () => {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
+  // ✅ FIX: per-user failedAttempts
   let failedAttempts = parseInt(localStorage.getItem(email + "_failedAttempts")) || 0;
 
   try {
@@ -81,54 +96,51 @@ window.login = async () => {
     const time = new Date().toLocaleTimeString();
 
     const { db } = await import("/static/firebase.js");
+    const { doc, getDoc } = await import(
+      "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js"
+    );
 
     const ref = doc(db, "activity", userCred.user.uid);
     const snap = await getDoc(ref);
 
     let loginCount = 1;
-
     if (snap.exists()) {
       loginCount = (snap.data().loginCount || 0) + 1;
     }
 
-    let prediction = 0;
+    // ML CALL
+    const response = await fetch("/predict", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        device,
+        location,
+        loginCount,
+        failedAttempts,
+        time
+      })
+    });
 
-    try {
-      const res = await fetch("/predict", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          device,
-          location,
-          loginCount,
-          failedAttempts, // send OLD value to ML
-          time
-        })
-      });
+    const result = await response.json();
 
-      const data = await res.json();
-      if (typeof data.prediction === "number") {
-        prediction = data.prediction;
-      }
+    if (result.prediction === 0) {
 
-    } catch {}
+      await storeData(failedAttempts);
 
-    if (prediction === 0) {
-
-      // ✅ STORE ONLY CURRENT SESSION VALUE
-      await storeData(failedAttempts, location);
-
-      // ✅ RESET AFTER SUCCESS LOGIN
+      // ✅ RESET AFTER SUCCESS
       localStorage.setItem(email + "_failedAttempts", 0);
 
       window.location = "/home";
 
     } else {
-      const otp = Math.floor(100000 + Math.random()*900000).toString();
+      localStorage.setItem(email + "_finalFailedAttempts", failedAttempts);
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
       localStorage.setItem("otp", otp);
       localStorage.setItem("otpTime", Date.now());
 
+      // ✅ EMAIL OTP (DO NOT CHANGE)
       await fetch("/send-otp", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -150,8 +162,8 @@ window.login = async () => {
   }
 };
 
-// ================= STORE =================
-async function storeData(failedAttempts, location) {
+// ================= STORE DATA =================
+async function storeData(failedAttempts) {
   const { db } = await import("/static/firebase.js");
   const { doc, setDoc, getDoc } = await import(
     "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js"
@@ -166,12 +178,18 @@ async function storeData(failedAttempts, location) {
   const snap = await getDoc(ref);
 
   let loginCount = 1;
+  let totalFailed = failedAttempts;
 
   if (snap.exists()) {
-    loginCount = (snap.data().loginCount || 0) + 1;
+    const old = snap.data();
+    loginCount = (old.loginCount || 0) + 1;
+
+    // ✅ accumulate properly
+    totalFailed = (old.failedAttempts || 0) + failedAttempts;
   }
 
-  // ✅ IMPORTANT: store only CURRENT session failedAttempts
+  const location = await getLocation();
+
   await setDoc(ref, {
     email,
     location,
@@ -179,6 +197,6 @@ async function storeData(failedAttempts, location) {
     date: now.toISOString().split("T")[0],
     time: now.toLocaleTimeString(),
     loginCount,
-    failedAttempts
+    failedAttempts: totalFailed
   });
 }
