@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Signup</title>
+
+<style>
+body {background:#0f172a;color:white;text-align:center;font-family:Arial;}
+.box {background:#1e293b;padding:20px;border-radius:10px;margin-top:60px;display:inline-block;}
+input {padding:10px;margin:8px;width:220px;border-radius:5px;border:none;}
+button {padding:10px 20px;margin:10px;border:none;background:#22c55e;color:white;border-radius:5px;}
+</style>
+
+</head>
+<body>
+
+<div class="box">
+<h2>Sign Up</h2>
+
+<input id="username" placeholder="Username"><br>
+<input id="email" placeholder="Email"><br>
+<input id="password" type="password" placeholder="Password"><br>
+
+<button onclick="signup()">Create Account</button>
+<button onclick="goLogin()">Back</button>
+
+<p id="msg"></p>
+</div>
+
+<!-- ✅ FIXED -->
+<script type="module" src="/static/script.js"></script>
+
+</body>
+</html>

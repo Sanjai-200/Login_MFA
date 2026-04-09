@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Home</title>
+
+<style>
+body {
+  background:#0f172a;
+  color:white;
+  text-align:center;
+  font-family:Arial;
+}
+
+.box {
+  background:#1e293b;
+  padding:20px;
+  border-radius:10px;
+  margin-top:50px;
+  display:inline-block;
+  width:300px;
+}
+
+.logs {
+  text-align:left;
+  margin-top:15px;
+  background:#0f172a;
+  padding:10px;
+  border-radius:8px;
+}
+
+.logs p {
+  margin:6px 0;
+  font-size:14px;
+}
+
+button {
+  padding:10px;
+  border:none;
+  background:#22c55e;
+  color:white;
+  border-radius:5px;
+  margin-top:15px;
+}
+</style>
+
+</head>
+<body>
+
+<div class="box">
+
+<h2 id="welcome">Loading...</h2>
+
+<h3>User Logs</h3>
+
+<div class="logs" id="userLogs">
+  Loading...
+</div>
+
+<button onclick="logout()">Logout</button>
+
+</div>
+
+<script type="module">
+import { db } from "/static/firebase.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+
+const uid = localStorage.getItem("uid");
+
+// 🔥 LOAD USERNAME (FINAL FIX)
+async function loadUsername() {
+  if (!uid) return;
+
+  try {
+    const ref = doc(db, "users", uid);
+    const snap = await getDoc(ref);
+
+    if (snap.exists() && snap.data().username) {
+      document.getElementById("welcome").innerText =
+        "Welcome " + snap.data().username;
+    } else {
+      document.getElementById("welcome").innerText =
+        "Welcome User";
+    }
+
+  } catch (e) {
+    console.log(e);
+    document.getElementById("welcome").innerText =
+      "Welcome User";
+  }
+}
+
+// 🔥 LOAD USER LOGS
+async function loadUserData() {
+  if (!uid) return;
+
+  try {
+    const ref = doc(db, "activity", uid);
+    const snap = await getDoc(ref);
+
+    if (snap.exists()) {
+      const data = snap.data();
+
+      document.getElementById("userLogs").innerHTML = `
+        <p><b>Device:</b> ${data.device || "-"}</p>
+        <p><b>Location:</b> ${data.location || "-"}</p>
+        <p><b>Time:</b> ${data.time || "-"}</p>
+        <p><b>Login Count:</b> ${data.loginCount || 0}</p>
+        <p><b>Failed Attempts:</b> ${data.failedAttempts || 0}</p>
+      `;
+    } else {
+      document.getElementById("userLogs").innerText = "No data found";
+    }
+
+  } catch (e) {
+    console.log(e);
+    document.getElementById("userLogs").innerText = "Error loading data";
+  }
+}
+
+// CALL FUNCTIONS
+loadUsername();
+loadUserData();
+
+// LOGOUT
+window.logout = function () {
+  localStorage.clear();
+  window.location = "/";
+};
+</script>
+
+</body>
+</html>
