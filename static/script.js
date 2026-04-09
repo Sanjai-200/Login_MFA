@@ -5,7 +5,7 @@ import {
   signInWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
 
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 
 // ROUTES
 window.goSignup = () => window.location = "/signup";
@@ -14,19 +14,16 @@ window.goLogin = () => window.location = "/";
 // EMAIL VALIDATION
 function isValidEmail(email) {
   const regex = /^[a-z0-9]+([._%+-]?[a-z0-9]+)*@[a-z0-9-]+\.[a-z]{2,}$/;
-
   if (!regex.test(email)) return false;
   if (email.includes("..") || email.includes("@.")) return false;
-
-  const allowedDomains = ["gmail.com", "yahoo.com", "outlook.com"];
-  return allowedDomains.includes(email.split("@")[1]);
+  return ["gmail.com", "yahoo.com", "outlook.com"].includes(email.split("@")[1]);
 }
 
 // DEVICE
 function getDevice() {
   if (
     navigator.userAgentData?.mobile ||
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    /Android|iPhone|iPad/i.test(navigator.userAgent) ||
     window.innerWidth <= 768
   ) return "Mobile";
 
@@ -38,18 +35,7 @@ async function getLocation() {
   try {
     let res = await fetch("https://ipwho.is/?t=" + Date.now(), { cache: "no-store" });
     let data = await res.json();
-
     if (data.success && data.country) return data.country;
-  } catch {}
-
-  try {
-    const ipRes = await fetch("https://api.ipify.org?format=json");
-    const ipData = await ipRes.json();
-
-    const res = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
-    const data = await res.json();
-
-    if (data.country_name) return data.country_name;
   } catch {}
 
   return "India";
@@ -57,29 +43,21 @@ async function getLocation() {
 
 // ================= SIGNUP =================
 window.signup = async () => {
-  const username = document.getElementById("username").value.trim();
-  const email = document.getElementById("email").value.trim();
-  const password = document.getElementById("password").value;
-
-  if (!isValidEmail(email)) {
-    document.getElementById("msg").innerText = "Invalid email ❌";
-    return;
-  }
+  const username = username.value.trim();
+  const email = email.value.trim();
+  const password = password.value;
 
   try {
     const user = await createUserWithEmailAndPassword(auth, email, password);
 
     const { db } = await import("/static/firebase.js");
-    await setDoc(doc(db, "users", user.user.uid), {
-      username,
-      email
-    });
+    await setDoc(doc(db, "users", user.user.uid), { username, email });
 
-    alert("Account created successfully!");
+    alert("Account created!");
     window.location = "/";
 
   } catch (e) {
-    document.getElementById("msg").innerText = e.message;
+    msg.innerText = e.message;
   }
 };
 
@@ -88,13 +66,11 @@ window.login = async () => {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
-  // 🔥 FIX: user-specific failedAttempts
   let failedAttempts = parseInt(localStorage.getItem(email + "_failedAttempts")) || 0;
 
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-    // reset after success
     localStorage.setItem(email + "_failedAttempts", 0);
 
     localStorage.setItem("uid", userCred.user.uid);
@@ -102,14 +78,9 @@ window.login = async () => {
 
     const device = getDevice();
     const location = await getLocation();
-
-    const now = new Date();
-    const time = now.toLocaleTimeString();
+    const time = new Date().toLocaleTimeString();
 
     const { db } = await import("/static/firebase.js");
-    const { doc, getDoc } = await import(
-      "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js"
-    );
 
     const ref = doc(db, "activity", userCred.user.uid);
     const snap = await getDoc(ref);
@@ -119,32 +90,35 @@ window.login = async () => {
       loginCount = (snap.data().loginCount || 0) + 1;
     }
 
-    const response = await fetch("/predict", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        device,
-        location,
-        loginCount,
-        failedAttempts,
-        time
-      })
-    });
+    // SAFE fallback
+    let prediction = 0;
 
-    const result = await response.json();
+    try {
+      const res = await fetch("/predict", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          device,
+          location,
+          loginCount,
+          failedAttempts,
+          time
+        })
+      });
 
-    if (result.prediction === 0) {
+      const data = await res.json();
+      if (typeof data.prediction === "number") {
+        prediction = data.prediction;
+      }
 
-      await storeData(failedAttempts);
+    } catch {}
 
-      localStorage.setItem(email + "_failedAttempts", 0);
+    if (prediction === 0) {
+      await storeData(failedAttempts, location);
       window.location = "/home";
 
     } else {
-      localStorage.setItem(email + "_finalFailedAttempts", failedAttempts);
-
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      localStorage.setItem("otp", otp);
+      localStorage.setItem("otp", Math.floor(100000 + Math.random()*900000));
       localStorage.setItem("otpTime", Date.now());
 
       await fetch("/send-otp", {
@@ -152,7 +126,7 @@ window.login = async () => {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           email: userCred.user.email,
-          otp: otp
+          otp: localStorage.getItem("otp")
         })
       });
 
@@ -162,8 +136,26 @@ window.login = async () => {
   } catch {
     failedAttempts++;
     localStorage.setItem(email + "_failedAttempts", failedAttempts);
-
-    document.getElementById("msg").innerText =
-      "Login failed ❌ (" + failedAttempts + ")";
+    msg.innerText = "Login failed ❌ (" + failedAttempts + ")";
   }
 };
+
+// ================= STORE =================
+async function storeData(failedAttempts, location) {
+  const { db } = await import("/static/firebase.js");
+
+  const uid = localStorage.getItem("uid");
+  const email = localStorage.getItem("email");
+
+  const now = new Date();
+
+  await setDoc(doc(db, "activity", uid), {
+    email,
+    location,
+    device: getDevice(),
+    date: now.toISOString().split("T")[0],
+    time: now.toLocaleTimeString(),
+    loginCount: 1,
+    failedAttempts
+  });
+}
