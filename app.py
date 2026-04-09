@@ -2,8 +2,14 @@ from flask import Flask, request, jsonify, render_template
 import pickle
 import pandas as pd
 from datetime import datetime
+import smtplib
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
+
+# ================= EMAIL CONFIG =================
+EMAIL_SENDER = "smart7mfa@gmail.com"
+EMAIL_PASSWORD = "qbfq ujgg pnpo ikrc"
 
 # LOAD MODEL
 with open("model.pkl", "rb") as f:
@@ -27,6 +33,38 @@ def home():
     return render_template("home.html")
 
 
+# ================= EMAIL FUNCTION =================
+def send_email(receiver, otp):
+    try:
+        msg = MIMEText(f"Your OTP is: {otp}")
+        msg["Subject"] = "Your OTP Code"
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = receiver
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+
+        print("✅ OTP Email sent")
+
+    except Exception as e:
+        print("❌ Email Error:", e)
+
+
+# ================= SEND OTP ROUTE =================
+@app.route("/send-otp", methods=["POST"])
+def send_otp():
+    data = request.json
+    email = data.get("email")
+    otp = data.get("otp")
+
+    send_email(email, otp)
+
+    return jsonify({"status": "sent"})
+
+
 # ================= SAFE PARSERS =================
 
 def safe_int(value, default=0):
@@ -43,11 +81,9 @@ def parse_time(time_str):
     time_str = str(time_str).strip()
 
     try:
-        # 24-hour format (21:24:18)
         if ":" in time_str and "AM" not in time_str and "PM" not in time_str:
             return int(time_str.split(":")[0])
 
-        # 12-hour format (7:24:18 PM)
         if "AM" in time_str or "PM" in time_str:
             try:
                 return datetime.strptime(time_str, "%I:%M:%S %p").hour
@@ -57,7 +93,7 @@ def parse_time(time_str):
     except:
         pass
 
-    return 12  # fallback
+    return 12
 
 
 def parse_location(location):
@@ -66,11 +102,10 @@ def parse_location(location):
 
     loc = str(location).strip().lower()
 
-    # treat safe
     if loc in ["india", "unknown", ""]:
         return 0
 
-    return 1  # risky
+    return 1
 
 
 def parse_device(device):
@@ -112,7 +147,6 @@ def predict():
 
     pred = model.predict(input_data)[0]
 
-    # DEBUG (optional)
     print("RAW INPUT:", data)
     print("PROCESSED:", input_data.to_dict())
     print("PREDICTION:", pred)
