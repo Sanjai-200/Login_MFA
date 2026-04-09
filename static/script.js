@@ -9,49 +9,83 @@ import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/
 
 // ROUTES
 window.goSignup = () => window.location = "/signup";
-window.goLogin = () => window.location = "/";
+window.goLogin  = () => window.location = "/";
 
-// DEVICE
+// ================= DEVICE =================
 function getDevice() {
   if (
     navigator.userAgentData?.mobile ||
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    window.innerWidth <= 768
   ) return "Mobile";
   return "Laptop";
 }
 
-// ✅ SINGLE LOCATION FUNCTION
+// ================= LOCATION (VPN-proof, 4-API chain) =================
+// Each API returns the VPN EXIT country when a VPN is active.
 async function getLocation() {
+
+  // API 1: ipapi.co — very reliable, no CORS issues
   try {
-    const res = await fetch("https://ipwho.is/");
+    const res  = await fetch("https://ipapi.co/json/", {
+      headers: { "Accept": "application/json" },
+      cache:   "no-store"
+    });
     const data = await res.json();
-    if (data.success) return data.country;
+    if (data.country_name && data.country_name !== "None") {
+      console.log("Location from ipapi.co:", data.country_name);
+      return data.country_name;
+    }
   } catch {}
 
+  // API 2: ip-api.com — returns VPN server location
   try {
-    const res = await fetch("https://ipapi.co/json/");
+    const res  = await fetch("https://ip-api.com/json/?fields=status,country", {
+      cache: "no-store"
+    });
     const data = await res.json();
-    if (data.country_name) return data.country_name;
+    if (data.status === "success" && data.country) {
+      console.log("Location from ip-api.com:", data.country);
+      return data.country;
+    }
   } catch {}
 
+  // API 3: ipwho.is — fallback
+  try {
+    const res  = await fetch("https://ipwho.is/", { cache: "no-store" });
+    const data = await res.json();
+    if (data.success && data.country) {
+      console.log("Location from ipwho.is:", data.country);
+      return data.country;
+    }
+  } catch {}
+
+  // API 4: freeipapi.com — last resort
+  try {
+    const res  = await fetch("https://freeipapi.com/api/json", { cache: "no-store" });
+    const data = await res.json();
+    if (data.countryName) {
+      console.log("Location from freeipapi:", data.countryName);
+      return data.countryName;
+    }
+  } catch {}
+
+  console.warn("All location APIs failed, returning Unknown");
   return "Unknown";
 }
 
 // ================= SIGNUP =================
 window.signup = async () => {
   const username = document.getElementById("username").value.trim();
-  const email = document.getElementById("email").value.trim();
+  const email    = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
   try {
-    const user = await createUserWithEmailAndPassword(auth, email, password);
-
-    const { db } = await import("/static/firebase.js");
-    await setDoc(doc(db, "users", user.user.uid), { username, email });
-
+    const userCred = await createUserWithEmailAndPassword(auth, email, password);
+    const { db }   = await import("/static/firebase.js");
+    await setDoc(doc(db, "users", userCred.user.uid), { username, email });
     alert("Account created!");
     window.location = "/";
-
   } catch (e) {
     document.getElementById("msg").innerText = e.message;
   }
@@ -59,119 +93,115 @@ window.signup = async () => {
 
 // ================= LOGIN =================
 window.login = async () => {
-  const email = document.getElementById("email").value.trim();
+  const email    = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
+  // Read current session failed attempts BEFORE attempting login
   let failedAttempts = parseInt(localStorage.getItem(email + "_failedAttempts")) || 0;
 
+  // ── STEP 1: Authenticate with Firebase ──────────────────────────────────
+  // Separate try/catch ONLY for auth — so wrong password is the ONLY
+  // thing that ever increments failedAttempts.
+  let userCred;
   try {
-    const userCred = await signInWithEmailAndPassword(auth, email, password);
+    userCred = await signInWithEmailAndPassword(auth, email, password);
+  } catch (authError) {
+    // ✅ Password was actually wrong — increment
+    failedAttempts++;
+    localStorage.setItem(email + "_failedAttempts", failedAttempts);
+    document.getElementById("msg").innerText = "Login failed ❌ (" + failedAttempts + ")";
+    return; // stop — don't run any post-login code
+  }
 
-    // ✅ IMPORTANT (OTP depends on this)
-    localStorage.setItem("email", userCred.user.email);
-    localStorage.setItem("uid", userCred.user.uid);
+  // ── STEP 2: Auth succeeded — IMMEDIATELY reset failed attempts ───────────
+  // Save snapshot of how many failed attempts happened this session
+  const sessionFailedAttempts = failedAttempts;
+  // Reset RIGHT NOW so even if anything below errors, it won't keep climbing
+  localStorage.setItem(email + "_failedAttempts", 0);
 
-    const device = getDevice();
-    const location = await getLocation();
-    const time = new Date().toLocaleTimeString();
+  // Store identity for otp.js
+  localStorage.setItem("email", userCred.user.email);
+  localStorage.setItem("uid",   userCred.user.uid);
 
+  // ── STEP 3: Collect context (non-critical, won't affect login flow) ──────
+  let device   = getDevice();
+  let location = "Unknown";
+  let time     = new Date().toLocaleTimeString();
+
+  try {
+    location = await getLocation();
+    time     = new Date().toLocaleTimeString();
+  } catch {}
+
+  // ── STEP 4: Get loginCount from Firestore ────────────────────────────────
+  let loginCount = 1;
+  try {
     const { db } = await import("/static/firebase.js");
-    const ref = doc(db, "activity", userCred.user.uid);
-    const snap = await getDoc(ref);
+    const ref    = doc(db, "activity", userCred.user.uid);
+    const snap   = await getDoc(ref);
+    loginCount   = snap.exists() ? (snap.data().loginCount || 0) + 1 : 1;
+  } catch {}
 
-    let loginCount = 1;
-    let totalFailed = failedAttempts;
+  // Save all pending data for otp.js to use after OTP verification
+  localStorage.setItem("pendingDevice",         device);
+  localStorage.setItem("pendingLocation",       location);
+  localStorage.setItem("pendingTime",           time);
+  localStorage.setItem("pendingLoginCount",     loginCount);
+  localStorage.setItem("pendingFailedAttempts", sessionFailedAttempts);
 
-    if (snap.exists()) {
-      const old = snap.data();
-      loginCount = (old.loginCount || 0) + 1;
-      totalFailed = old.failedAttempts || 0;
-    }
-
-    const res = await fetch("/predict", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
+  // ── STEP 5: ML Prediction ────────────────────────────────────────────────
+  let prediction = 0; // default to safe if /predict unreachable
+  try {
+    const res    = await fetch("/predict", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
         device,
         location,
         loginCount,
-        failedAttempts,
+        failedAttempts: sessionFailedAttempts,
         time
       })
     });
-
     const result = await res.json();
+    if (typeof result.prediction === "number") {
+      prediction = result.prediction;
+    }
+  } catch {}
 
-    if (result.prediction === 0) {
-
+  // ── STEP 6: Route based on prediction ───────────────────────────────────
+  if (prediction === 0) {
+    // SAFE — save activity and go home
+    try {
+      const { db } = await import("/static/firebase.js");
+      const ref    = doc(db, "activity", userCred.user.uid);
       await setDoc(ref, {
         email,
         location,
         device,
-        date: new Date().toISOString().split("T")[0],
+        date:           new Date().toISOString().split("T")[0],
         time,
         loginCount,
-        failedAttempts: totalFailed
+        failedAttempts: sessionFailedAttempts  // overwrite with THIS session's count
       });
+    } catch {}
 
-      window.location = "/home";
+    window.location = "/home";
 
-    } else {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  } else {
+    // RISKY — send OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    localStorage.setItem("otp",     otp);
+    localStorage.setItem("otpTime", Date.now());
 
-      localStorage.setItem("otp", otp);
-
-      // ✅ EMAIL OTP (WORKING)
+    try {
       await fetch("/send-otp", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          email: userCred.user.email,
-          otp: otp
-        })
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email: userCred.user.email, otp })
       });
+    } catch {}
 
-      window.location = "/otp";
-    }
-
-  } catch {
-    failedAttempts++;
-    localStorage.setItem(email + "_failedAttempts", failedAttempts);
-
-    document.getElementById("msg").innerText =
-      "Login failed ❌ (" + failedAttempts + ")";
+    window.location = "/otp";
   }
 };
-
-// ================= OTP =================
-async function verifyOTP() {
-  const entered = document.getElementById("otpInput").value.trim();
-  const otp = localStorage.getItem("otp");
-
-  if (entered === otp) {
-    window.location = "/home";
-  } else {
-    document.getElementById("msg").innerText = "Wrong OTP ❌";
-  }
-}
-
-async function resendOTP() {
-  const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-  localStorage.setItem("otp", newOtp);
-
-  const email = localStorage.getItem("email");
-
-  await fetch("/send-otp", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      email,
-      otp: newOtp
-    })
-  });
-
-  document.getElementById("msg").innerText = "New OTP sent 📩";
-}
-
-document.getElementById("verifyBtn")?.addEventListener("click", verifyOTP);
-document.getElementById("resendBtn")?.addEventListener("click", resendOTP);
