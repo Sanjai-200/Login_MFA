@@ -33,7 +33,7 @@ def home():
     return render_template("home.html")
 
 
-# ================= EMAIL FUNCTION =================
+# ================= EMAIL =================
 def send_email(receiver, otp):
     try:
         msg = MIMEText(f"Your OTP is: {otp}")
@@ -53,20 +53,14 @@ def send_email(receiver, otp):
         print("❌ Email Error:", e)
 
 
-# ================= SEND OTP ROUTE =================
 @app.route("/send-otp", methods=["POST"])
 def send_otp():
     data = request.json
-    email = data.get("email")
-    otp = data.get("otp")
-
-    send_email(email, otp)
-
+    send_email(data.get("email"), data.get("otp"))
     return jsonify({"status": "sent"})
 
 
-# ================= SAFE PARSERS =================
-
+# ================= PARSERS =================
 def safe_int(value, default=0):
     try:
         return int(value)
@@ -75,51 +69,32 @@ def safe_int(value, default=0):
 
 
 def parse_time(time_str):
-    if not time_str:
+    try:
+        return int(str(time_str).split(":")[0])
+    except:
         return 12
 
-    time_str = str(time_str).strip()
 
-    try:
-        if ":" in time_str and "AM" not in time_str and "PM" not in time_str:
-            return int(time_str.split(":")[0])
-
-        if "AM" in time_str or "PM" in time_str:
-            try:
-                return datetime.strptime(time_str, "%I:%M:%S %p").hour
-            except:
-                return datetime.strptime(time_str, "%I:%M %p").hour
-    except:
-        pass
-
-    return 12
-
-
-# 🔥 FIXED ENCODING (IMPORTANT)
+# ✅ CORRECT ENCODING (DO NOT CHANGE)
 def parse_location(location):
     if not location:
-        return 1  # treat unknown as risky
-
-    loc = str(location).strip().lower()
-
-    if loc == "india":
-        return 1   # safe
-    return 0       # risky
+        return 0
+    loc = str(location).lower()
+    if loc in ["india", "unknown", ""]:
+        return 0
+    return 1
 
 
 def parse_device(device):
     if not device:
         return 0
-
     dev = str(device).lower()
-
     if "mobile" in dev:
-        return 0   # safe
-    return 1       # laptop
+        return 1
+    return 0
 
 
 # ================= ENCODE =================
-
 def encode(data):
     device = parse_device(data.get("device"))
     location = parse_location(data.get("location"))
@@ -132,13 +107,12 @@ def encode(data):
         columns=["device", "location", "loginCount", "hour", "failedAttempts"]
     )
 
-    print("FINAL MODEL INPUT:", df.values.tolist())  # 🔥 debug
+    print("FINAL INPUT:", df.values.tolist())
 
     return df
 
 
 # ================= PREDICT =================
-
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.json
@@ -147,7 +121,6 @@ def predict():
 
     pred = model.predict(input_data)[0]
 
-    print("RAW INPUT:", data)
     print("PREDICTION:", pred)
 
     return jsonify({"prediction": int(pred)})
