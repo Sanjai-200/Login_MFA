@@ -15,50 +15,25 @@ window.goLogin = () => window.location = "/";
 function getDevice() {
   if (
     navigator.userAgentData?.mobile ||
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    window.innerWidth <= 768
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   ) return "Mobile";
-
   return "Laptop";
 }
 
-// 🔥 SUPER STRONG LOCATION (VPN DETECTION READY)
+// ✅ SINGLE LOCATION FUNCTION
 async function getLocation() {
-
-  // API 1 (fast + reliable)
   try {
-    const res = await fetch("https://ipwho.is/?t=" + Date.now(), { cache: "no-store" });
+    const res = await fetch("https://ipwho.is/");
     const data = await res.json();
-
-    if (data && data.success && data.country) {
-      console.log("Location (ipwho):", data.country);
-      return data.country;
-    }
+    if (data.success) return data.country;
   } catch {}
 
-  // API 2 (backup)
   try {
     const res = await fetch("https://ipapi.co/json/");
     const data = await res.json();
-
-    if (data && data.country_name) {
-      console.log("Location (ipapi):", data.country_name);
-      return data.country_name;
-    }
+    if (data.country_name) return data.country_name;
   } catch {}
 
-  // API 3 (strong fallback)
-  try {
-    const res = await fetch("https://ipinfo.io/json?token=");
-    const data = await res.json();
-
-    if (data && data.country) {
-      console.log("Location (ipinfo):", data.country);
-      return data.country;
-    }
-  } catch {}
-
-  console.log("Location fallback → Unknown");
   return "Unknown";
 }
 
@@ -74,7 +49,7 @@ window.signup = async () => {
     const { db } = await import("/static/firebase.js");
     await setDoc(doc(db, "users", user.user.uid), { username, email });
 
-    alert("Account created successfully!");
+    alert("Account created!");
     window.location = "/";
 
   } catch (e) {
@@ -92,8 +67,9 @@ window.login = async () => {
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-    localStorage.setItem("uid", userCred.user.uid);
+    // ✅ IMPORTANT (OTP depends on this)
     localStorage.setItem("email", userCred.user.email);
+    localStorage.setItem("uid", userCred.user.uid);
 
     const device = getDevice();
     const location = await getLocation();
@@ -108,12 +84,11 @@ window.login = async () => {
 
     if (snap.exists()) {
       const old = snap.data();
-
       loginCount = (old.loginCount || 0) + 1;
       totalFailed = old.failedAttempts || 0;
     }
 
-    const response = await fetch("/predict", {
+    const res = await fetch("/predict", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -125,7 +100,7 @@ window.login = async () => {
       })
     });
 
-    const result = await response.json();
+    const result = await res.json();
 
     if (result.prediction === 0) {
 
@@ -137,19 +112,16 @@ window.login = async () => {
         time,
         loginCount,
         failedAttempts: totalFailed
-      }, { merge: true });
+      });
 
       window.location = "/home";
 
     } else {
-      localStorage.setItem(email + "_finalFailedAttempts", failedAttempts);
-
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
       localStorage.setItem("otp", otp);
-      localStorage.setItem("otpTime", Date.now());
 
-      // ✅ EMAIL OTP (UNCHANGED)
+      // ✅ EMAIL OTP (WORKING)
       await fetch("/send-otp", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -201,6 +173,5 @@ async function resendOTP() {
   document.getElementById("msg").innerText = "New OTP sent 📩";
 }
 
-// EVENTS
 document.getElementById("verifyBtn")?.addEventListener("click", verifyOTP);
 document.getElementById("resendBtn")?.addEventListener("click", resendOTP);
