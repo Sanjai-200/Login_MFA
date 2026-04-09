@@ -11,14 +11,6 @@ import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/
 window.goSignup = () => window.location = "/signup";
 window.goLogin = () => window.location = "/";
 
-// EMAIL VALIDATION
-function isValidEmail(email) {
-  const regex = /^[a-z0-9]+([._%+-]?[a-z0-9]+)*@[a-z0-9-]+\.[a-z]{2,}$/;
-  if (!regex.test(email)) return false;
-  if (email.includes("..") || email.includes("@.")) return false;
-  return ["gmail.com", "yahoo.com", "outlook.com"].includes(email.split("@")[1]);
-}
-
 // DEVICE
 function getDevice() {
   if (
@@ -30,20 +22,29 @@ function getDevice() {
   return "Laptop";
 }
 
-// LOCATION
+// LOCATION (KEEP WORKING VERSION)
 async function getLocation() {
   try {
     let res = await fetch("https://ipwho.is/?t=" + Date.now(), { cache: "no-store" });
     let data = await res.json();
-    if (data.success && data.country) return data.country;
+    if (data && data.success && data.country) return data.country;
   } catch {}
 
-  return "India";
+  try {
+    const ipRes = await fetch("https://api.ipify.org?format=json");
+    const ipData = await ipRes.json();
+
+    const res = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
+    const data = await res.json();
+
+    if (data && data.country_name) return data.country_name;
+  } catch {}
+
+  return "Unknown";
 }
 
 // ================= SIGNUP =================
 window.signup = async () => {
-  // ✅ FIXED (correct DOM access)
   const username = document.getElementById("username").value.trim();
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
@@ -72,8 +73,6 @@ window.login = async () => {
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-    // ❌ DO NOT reset here (moved below)
-
     localStorage.setItem("uid", userCred.user.uid);
     localStorage.setItem("email", userCred.user.email);
 
@@ -87,6 +86,7 @@ window.login = async () => {
     const snap = await getDoc(ref);
 
     let loginCount = 1;
+
     if (snap.exists()) {
       loginCount = (snap.data().loginCount || 0) + 1;
     }
@@ -101,7 +101,7 @@ window.login = async () => {
           device,
           location,
           loginCount,
-          failedAttempts,
+          failedAttempts, // send OLD value to ML
           time
         })
       });
@@ -115,16 +115,18 @@ window.login = async () => {
 
     if (prediction === 0) {
 
-      // ✅ STORE BEFORE RESET
+      // ✅ STORE ONLY CURRENT SESSION VALUE
       await storeData(failedAttempts, location);
 
-      // ✅ RESET AFTER STORE
+      // ✅ RESET AFTER SUCCESS LOGIN
       localStorage.setItem(email + "_failedAttempts", 0);
 
       window.location = "/home";
 
     } else {
-      localStorage.setItem("otp", Math.floor(100000 + Math.random()*900000));
+      const otp = Math.floor(100000 + Math.random()*900000).toString();
+
+      localStorage.setItem("otp", otp);
       localStorage.setItem("otpTime", Date.now());
 
       await fetch("/send-otp", {
@@ -132,7 +134,7 @@ window.login = async () => {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           email: userCred.user.email,
-          otp: localStorage.getItem("otp")
+          otp: otp
         })
       });
 
@@ -164,18 +166,12 @@ async function storeData(failedAttempts, location) {
   const snap = await getDoc(ref);
 
   let loginCount = 1;
-  let totalFailedAttempts = failedAttempts;
 
   if (snap.exists()) {
-    const oldData = snap.data();
-
-    // ✅ FIX loginCount increment
-    loginCount = (oldData.loginCount || 0) + 1;
-
-    // ✅ FIX failedAttempts accumulation
-    totalFailedAttempts = (oldData.failedAttempts || 0) + failedAttempts;
+    loginCount = (snap.data().loginCount || 0) + 1;
   }
 
+  // ✅ IMPORTANT: store only CURRENT session failedAttempts
   await setDoc(ref, {
     email,
     location,
@@ -183,6 +179,6 @@ async function storeData(failedAttempts, location) {
     date: now.toISOString().split("T")[0],
     time: now.toLocaleTimeString(),
     loginCount,
-    failedAttempts: totalFailedAttempts
+    failedAttempts
   });
 }
