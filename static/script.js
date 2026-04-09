@@ -43,9 +43,10 @@ async function getLocation() {
 
 // ================= SIGNUP =================
 window.signup = async () => {
-  const username = username.value.trim();
-  const email = email.value.trim();
-  const password = password.value;
+  // 🔥 FIX HERE (ONLY CHANGE)
+  const username = document.getElementById("username").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
 
   try {
     const user = await createUserWithEmailAndPassword(auth, email, password);
@@ -57,7 +58,7 @@ window.signup = async () => {
     window.location = "/";
 
   } catch (e) {
-    msg.innerText = e.message;
+    document.getElementById("msg").innerText = e.message;
   }
 };
 
@@ -90,7 +91,6 @@ window.login = async () => {
       loginCount = (snap.data().loginCount || 0) + 1;
     }
 
-    // SAFE fallback
     let prediction = 0;
 
     try {
@@ -136,7 +136,8 @@ window.login = async () => {
   } catch {
     failedAttempts++;
     localStorage.setItem(email + "_failedAttempts", failedAttempts);
-    msg.innerText = "Login failed ❌ (" + failedAttempts + ")";
+    document.getElementById("msg").innerText =
+      "Login failed ❌ (" + failedAttempts + ")";
   }
 };
 
