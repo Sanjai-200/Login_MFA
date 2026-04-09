@@ -89,23 +89,22 @@ def parse_time(time_str):
                 return datetime.strptime(time_str, "%I:%M:%S %p").hour
             except:
                 return datetime.strptime(time_str, "%I:%M %p").hour
-
     except:
         pass
 
     return 12
 
 
+# 🔥 FIXED ENCODING (IMPORTANT)
 def parse_location(location):
     if not location:
-        return 0
+        return 1  # treat unknown as risky
 
     loc = str(location).strip().lower()
 
-    if loc in ["india", "unknown", ""]:
-        return 0
-
-    return 1
+    if loc == "india":
+        return 1   # safe
+    return 0       # risky
 
 
 def parse_device(device):
@@ -115,9 +114,8 @@ def parse_device(device):
     dev = str(device).lower()
 
     if "mobile" in dev:
-        return 1
-
-    return 0
+        return 0   # safe
+    return 1       # laptop
 
 
 # ================= ENCODE =================
@@ -134,6 +132,8 @@ def encode(data):
         columns=["device", "location", "loginCount", "hour", "failedAttempts"]
     )
 
+    print("FINAL MODEL INPUT:", df.values.tolist())  # 🔥 debug
+
     return df
 
 
@@ -148,7 +148,6 @@ def predict():
     pred = model.predict(input_data)[0]
 
     print("RAW INPUT:", data)
-    print("PROCESSED:", input_data.to_dict())
     print("PREDICTION:", pred)
 
     return jsonify({"prediction": int(pred)})
