@@ -22,24 +22,43 @@ function getDevice() {
   return "Laptop";
 }
 
-// ✅ SINGLE CLEAN LOCATION FUNCTION
+// 🔥 SUPER STRONG LOCATION (VPN DETECTION READY)
 async function getLocation() {
+
+  // API 1 (fast + reliable)
   try {
     const res = await fetch("https://ipwho.is/?t=" + Date.now(), { cache: "no-store" });
     const data = await res.json();
-    if (data.success && data.country) return data.country;
+
+    if (data && data.success && data.country) {
+      console.log("Location (ipwho):", data.country);
+      return data.country;
+    }
   } catch {}
 
+  // API 2 (backup)
   try {
-    const ipRes = await fetch("https://api.ipify.org?format=json");
-    const ipData = await ipRes.json();
-
-    const res = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
+    const res = await fetch("https://ipapi.co/json/");
     const data = await res.json();
 
-    if (data.country_name) return data.country_name;
+    if (data && data.country_name) {
+      console.log("Location (ipapi):", data.country_name);
+      return data.country_name;
+    }
   } catch {}
 
+  // API 3 (strong fallback)
+  try {
+    const res = await fetch("https://ipinfo.io/json?token=");
+    const data = await res.json();
+
+    if (data && data.country) {
+      console.log("Location (ipinfo):", data.country);
+      return data.country;
+    }
+  } catch {}
+
+  console.log("Location fallback → Unknown");
   return "Unknown";
 }
 
@@ -81,7 +100,6 @@ window.login = async () => {
     const time = new Date().toLocaleTimeString();
 
     const { db } = await import("/static/firebase.js");
-
     const ref = doc(db, "activity", userCred.user.uid);
     const snap = await getDoc(ref);
 
@@ -91,14 +109,10 @@ window.login = async () => {
     if (snap.exists()) {
       const old = snap.data();
 
-      // ✅ FIX loginCount
       loginCount = (old.loginCount || 0) + 1;
-
-      // ✅ FIX failedAttempts accumulation
-      totalFailed = (old.failedAttempts || 0) + failedAttempts;
+      totalFailed = old.failedAttempts || 0;
     }
 
-    // ML CALL
     const response = await fetch("/predict", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -115,7 +129,6 @@ window.login = async () => {
 
     if (result.prediction === 0) {
 
-      // ✅ STORE FINAL VALUES (NO DUPLICATE LOGIC)
       await setDoc(ref, {
         email,
         location,
@@ -124,10 +137,7 @@ window.login = async () => {
         time,
         loginCount,
         failedAttempts: totalFailed
-      });
-
-      // ✅ RESET AFTER SUCCESS
-      localStorage.setItem(email + "_failedAttempts", 0);
+      }, { merge: true });
 
       window.location = "/home";
 
@@ -139,7 +149,7 @@ window.login = async () => {
       localStorage.setItem("otp", otp);
       localStorage.setItem("otpTime", Date.now());
 
-      // ✅ KEEP YOUR OTP EMAIL SYSTEM
+      // ✅ EMAIL OTP (UNCHANGED)
       await fetch("/send-otp", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
