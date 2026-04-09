@@ -43,7 +43,7 @@ async function getLocation() {
 
 // ================= SIGNUP =================
 window.signup = async () => {
-  // 🔥 FIX HERE (ONLY CHANGE)
+  // ✅ FIXED (correct DOM access)
   const username = document.getElementById("username").value.trim();
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
@@ -72,7 +72,7 @@ window.login = async () => {
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-    localStorage.setItem(email + "_failedAttempts", 0);
+    // ❌ DO NOT reset here (moved below)
 
     localStorage.setItem("uid", userCred.user.uid);
     localStorage.setItem("email", userCred.user.email);
@@ -114,7 +114,13 @@ window.login = async () => {
     } catch {}
 
     if (prediction === 0) {
+
+      // ✅ STORE BEFORE RESET
       await storeData(failedAttempts, location);
+
+      // ✅ RESET AFTER STORE
+      localStorage.setItem(email + "_failedAttempts", 0);
+
       window.location = "/home";
 
     } else {
@@ -136,6 +142,7 @@ window.login = async () => {
   } catch {
     failedAttempts++;
     localStorage.setItem(email + "_failedAttempts", failedAttempts);
+
     document.getElementById("msg").innerText =
       "Login failed ❌ (" + failedAttempts + ")";
   }
@@ -144,19 +151,38 @@ window.login = async () => {
 // ================= STORE =================
 async function storeData(failedAttempts, location) {
   const { db } = await import("/static/firebase.js");
+  const { doc, setDoc, getDoc } = await import(
+    "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js"
+  );
 
   const uid = localStorage.getItem("uid");
   const email = localStorage.getItem("email");
 
   const now = new Date();
 
-  await setDoc(doc(db, "activity", uid), {
+  const ref = doc(db, "activity", uid);
+  const snap = await getDoc(ref);
+
+  let loginCount = 1;
+  let totalFailedAttempts = failedAttempts;
+
+  if (snap.exists()) {
+    const oldData = snap.data();
+
+    // ✅ FIX loginCount increment
+    loginCount = (oldData.loginCount || 0) + 1;
+
+    // ✅ FIX failedAttempts accumulation
+    totalFailedAttempts = (oldData.failedAttempts || 0) + failedAttempts;
+  }
+
+  await setDoc(ref, {
     email,
     location,
     device: getDevice(),
     date: now.toISOString().split("T")[0],
     time: now.toLocaleTimeString(),
-    loginCount: 1,
-    failedAttempts
+    loginCount,
+    failedAttempts: totalFailedAttempts
   });
 }
