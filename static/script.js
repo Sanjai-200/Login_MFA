@@ -88,10 +88,14 @@ window.login = async () => {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
-  let failedAttempts = parseInt(localStorage.getItem("failedAttempts")) || 0;
+  // 🔥 FIX: user-specific failedAttempts
+  let failedAttempts = parseInt(localStorage.getItem(email + "_failedAttempts")) || 0;
 
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
+
+    // reset after success
+    localStorage.setItem(email + "_failedAttempts", 0);
 
     localStorage.setItem("uid", userCred.user.uid);
     localStorage.setItem("email", userCred.user.email);
@@ -110,13 +114,9 @@ window.login = async () => {
     const ref = doc(db, "activity", userCred.user.uid);
     const snap = await getDoc(ref);
 
-    let loginCount;
-
+    let loginCount = 1;
     if (snap.exists()) {
       loginCount = (snap.data().loginCount || 0) + 1;
-    } else {
-      // 🔥 FIX: avoid first-login treated as risk
-      loginCount = 2;
     }
 
     const response = await fetch("/predict", {
@@ -137,11 +137,11 @@ window.login = async () => {
 
       await storeData(failedAttempts);
 
-      localStorage.setItem("failedAttempts", 0);
+      localStorage.setItem(email + "_failedAttempts", 0);
       window.location = "/home";
 
     } else {
-      localStorage.setItem("finalFailedAttempts", failedAttempts);
+      localStorage.setItem(email + "_finalFailedAttempts", failedAttempts);
 
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       localStorage.setItem("otp", otp);
@@ -161,7 +161,7 @@ window.login = async () => {
 
   } catch {
     failedAttempts++;
-    localStorage.setItem("failedAttempts", failedAttempts);
+    localStorage.setItem(email + "_failedAttempts", failedAttempts);
 
     document.getElementById("msg").innerText =
       "Login failed ❌ (" + failedAttempts + ")";
