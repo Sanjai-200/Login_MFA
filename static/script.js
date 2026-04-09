@@ -110,9 +110,13 @@ window.login = async () => {
     const ref = doc(db, "activity", userCred.user.uid);
     const snap = await getDoc(ref);
 
-    let loginCount = 1;
+    let loginCount;
+
     if (snap.exists()) {
       loginCount = (snap.data().loginCount || 0) + 1;
+    } else {
+      // 🔥 FIX: avoid first-login treated as risk
+      loginCount = 2;
     }
 
     const response = await fetch("/predict", {
@@ -143,7 +147,6 @@ window.login = async () => {
       localStorage.setItem("otp", otp);
       localStorage.setItem("otpTime", Date.now());
 
-      // 🔥 SEND EMAIL INSTEAD OF ALERT
       await fetch("/send-otp", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
